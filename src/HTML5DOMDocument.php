@@ -3,14 +3,14 @@
 /*
  * HTML5 DOMDocument PHP library (extends DOMDocument)
  * https://github.com/ivopetkov/html5-dom-document-php
- * Copyright 2016, Ivo Petkov
+ * Copyright (c) Ivo Petkov
  * Free to use under the MIT license.
  */
 
 namespace IvoPetkov;
 
 /**
- *
+ * Represents a live (can be manipulated) representation of a HTML5 document.
  */
 class HTML5DOMDocument extends \DOMDocument
 {
@@ -18,11 +18,34 @@ class HTML5DOMDocument extends \DOMDocument
     use \IvoPetkov\HTML5DOMDocument\Internal\QuerySelectors;
 
     /**
-     * Used to store information about the results of saveHTML. If those results are passed to loadHTML some optimizations are applied.
-     *
-     * @var array
+     * An option passed to loadHTML() and loadHTMLFile() to disable duplicate element IDs exception.
      */
-    static private $savedHTML = [];
+    const ALLOW_DUPLICATE_IDS = 67108864;
+
+    /**
+     * A modification (passed to modify()) that removes all but the last title elements.
+     */
+    const FIX_MULTIPLE_TITLES = 2;
+
+    /**
+     * A modification (passed to modify()) that removes all but the last metatags with matching name or property attributes.
+     */
+    const FIX_DUPLICATE_METATAGS = 4;
+
+    /**
+     * A modification (passed to modify()) that merges multiple head elements.
+     */
+    const FIX_MULTIPLE_HEADS = 8;
+
+    /**
+     * A modification (passed to modify()) that merges multiple body elements.
+     */
+    const FIX_MULTIPLE_BODIES = 16;
+
+    /**
+     * A modification (passed to modify()) that moves charset metatag and title elements first.
+     */
+    const OPTIMIZE_HEAD = 32;
 
     /**
      *
@@ -31,14 +54,14 @@ class HTML5DOMDocument extends \DOMDocument
     static private $newObjectsCache = [];
 
     /**
-     * Indicates whether an HTML code is loaded
+     * Indicates whether an HTML code is loaded.
      *
      * @var boolean
      */
     private $loaded = false;
 
     /**
-     * Creates a new \IvoPetkov\HTML5DOMDocument object
+     * Creates a new HTML5DOMDocument object.
      *
      * @param string $version The version number of the document as part of the XML declaration.
      * @param string $encoding The encoding of the document as part of the XML declaration.
@@ -50,15 +73,14 @@ class HTML5DOMDocument extends \DOMDocument
     }
 
     /**
-     * Load HTML from a string and adds missing doctype, html and body tags
+     * Load HTML from a string.
      *
-     * @param string $source The HTML code
-     * @param int $options Additional Libxml parameters
-     * @return boolean TRUE on success or FALSE on failure
+     * @param string $source The HTML code.
+     * @param int $options Additional Libxml parameters.
+     * @return boolean TRUE on success or FALSE on failure.
      */
     public function loadHTML($source, $options = 0)
     {
-        $isSavedHTML = isset(self::$savedHTML[md5($source)]);
         // Enables libxml errors handling
         $internalErrorsOptionValue = libxml_use_internal_errors();
         if ($internalErrorsOptionValue === false) {
@@ -67,43 +89,47 @@ class HTML5DOMDocument extends \DOMDocument
 
         $source = trim($source);
 
+        $autoAddHtmlAndBodyTags = !defined('LIBXML_HTML_NOIMPLIED') || ($options & LIBXML_HTML_NOIMPLIED) === 0;
+        $autoAddDoctype = !defined('LIBXML_HTML_NODEFDTD') || ($options & LIBXML_HTML_NODEFDTD) === 0;
+
+        $allowDuplicateIDs = ($options & self::ALLOW_DUPLICATE_IDS) !== 0;
+
         // Add body tag if missing
-        if ($source !== '' && preg_match('/\<!DOCTYPE.*?\>/', $source) === 0 && preg_match('/\<html.*?\>/', $source) === 0 && preg_match('/\<body.*?\>/', $source) === 0 && preg_match('/\<head.*?\>/', $source) === 0) {
+        if ($autoAddHtmlAndBodyTags && $source !== '' && preg_match('/\<!DOCTYPE.*?\>/', $source) === 0 && preg_match('/\<html.*?\>/', $source) === 0 && preg_match('/\<body.*?\>/', $source) === 0 && preg_match('/\<head.*?\>/', $source) === 0) {
             $source = '<body>' . $source . '</body>';
         }
 
-        if (strtoupper(substr($source, 0, 9)) !== '<!DOCTYPE') {
-            $source = '<!DOCTYPE html>' . $source;
+        // Add DOCTYPE if missing
+        if ($autoAddDoctype && strtoupper(substr($source, 0, 9)) !== '<!DOCTYPE') {
+            $source = "<!DOCTYPE html>\n" . $source;
         }
 
         // Adds temporary head tag
         $charsetTag = '<meta data-html5-dom-document-internal-attribute="charset-meta" http-equiv="content-type" content="text/html; charset=utf-8" />';
         $matches = [];
         preg_match('/\<head.*?\>/', $source, $matches);
-        $removeHeadTag = true;
-        $removeHtmlTag = true;
+        $removeHeadTag = false;
+        $removeHtmlTag = false;
         if (isset($matches[0])) { // has head tag
-            $removeHeadTag = false;
-            $removeHtmlTag = false;
             $insertPosition = strpos($source, $matches[0]) + strlen($matches[0]);
             $source = substr($source, 0, $insertPosition) . $charsetTag . substr($source, $insertPosition);
         } else {
             $matches = [];
             preg_match('/\<html.*?\>/', $source, $matches);
             if (isset($matches[0])) { // has html tag
-                $removeHtmlTag = false;
-                $source = str_replace($matches[0], $matches[0] . $charsetTag, $source);
+                $source = str_replace($matches[0], $matches[0] . '<head>' . $charsetTag . '</head>', $source);
             } else {
-                $insertPosition = strpos($source, '>') + 1;
-                $source = substr($source, 0, $insertPosition) . $charsetTag . substr($source, $insertPosition);
+                $source = '<head>' . $charsetTag . '</head>' . $source;
+                $removeHtmlTag = true;
             }
+            $removeHeadTag = true;
         }
 
         // Preserve html entities
         $source = preg_replace('/&([a-zA-Z]*);/', 'html5-dom-document-internal-entity1-$1-end', $source);
         $source = preg_replace('/&#([0-9]*);/', 'html5-dom-document-internal-entity2-$1-end', $source);
 
-        $result = parent::loadHTML('<?xml encoding="utf-8" ?>' . $source, $options | LIBXML_NOENT);
+        $result = parent::loadHTML('<?xml encoding="utf-8" ?>' . $source, $options);
         if ($internalErrorsOptionValue === false) {
             libxml_use_internal_errors(false);
         }
@@ -123,83 +149,38 @@ class HTML5DOMDocument extends \DOMDocument
                 $headElement = $metaTagElement->parentNode;
                 $htmlElement = $headElement->parentNode;
                 $metaTagElement->parentNode->removeChild($metaTagElement);
-                if ($removeHeadTag && $headElement->firstChild === null) {
+                if ($removeHeadTag && $headElement !== null && $headElement->parentNode !== null && ($headElement->firstChild === null || ($headElement->childNodes->length === 1 && $headElement->firstChild instanceof \DOMText))) {
                     $headElement->parentNode->removeChild($headElement);
                 }
-                if ($removeHtmlTag && $htmlElement->firstChild === null) {
+                if ($removeHtmlTag && $htmlElement !== null && $htmlElement->parentNode !== null && $htmlElement->firstChild === null) {
                     $htmlElement->parentNode->removeChild($htmlElement);
                 }
             }
         }
 
-        if (!$isSavedHTML) {
-            // Update dom if there are multiple head tags
-            $headElements = $this->getElementsByTagName('head');
-            if ($headElements->length > 1) {
-                $firstHeadElement = $headElements->item(0);
-                while ($headElements->length > 1) {
-                    $nextHeadElement = $headElements->item(1);
-                    $nextHeadElementChildren = $nextHeadElement->childNodes;
-                    $nextHeadElementChildrenCount = $nextHeadElementChildren->length;
-                    for ($i = 0; $i < $nextHeadElementChildrenCount; $i++) {
-                        $firstHeadElement->appendChild($nextHeadElementChildren->item(0));
-                    }
-                    $nextHeadElement->parentNode->removeChild($nextHeadElement);
-                }
-            }
-
-            // Update dom if there are multiple body tags
-            $bodyElements = $this->getElementsByTagName('body');
-            if ($bodyElements->length > 1) {
-                $firstBodyElement = $bodyElements->item(0);
-                while ($bodyElements->length > 1) {
-                    $nextBodyElement = $bodyElements->item(1);
-                    $nextBodyElementChildren = $nextBodyElement->childNodes;
-                    $nextBodyElementChildrenCount = $nextBodyElementChildren->length;
-                    for ($i = 0; $i < $nextBodyElementChildrenCount; $i++) {
-                        $firstBodyElement->appendChild($nextBodyElementChildren->item(0));
-                    }
-                    $nextBodyElement->parentNode->removeChild($nextBodyElement);
-                }
-            }
-
-            if (!isset($this->internalDisableDuplicatesRemoval)) {
-                $this->removeDuplicateTitleTags();
-                $this->removeDuplicateMetatags();
-                $potentialElementsIDs = $this->getPotentialElementsIDs($source);
-                foreach ($potentialElementsIDs as $potentialOccurrencesCount) {
-                    if ($potentialOccurrencesCount > 1) {
-                        $elementsToRemove = [];
-                        $walkChildren = function($element) use (&$walkChildren, &$elementsToRemove) {
-                            foreach ($element->childNodes as $child) {
-                                if ($child instanceof \DOMElement) {
-                                    if ($child->attributes->length > 0) { // Performance optimization
-                                        $id = $child->getAttribute('id');
-                                        if ($id !== '') {
-                                            if (isset($elementsToRemove[$id])) { // All other elements with specific ID are added to the array
-                                                $elementsToRemove[$id][] = $child;
-                                                continue; // Don't check the children because they will be removed anyway
-                                            } else { // The array is created for the first element with a specific ID
-                                                $elementsToRemove[$id] = [];
-                                            }
-                                        }
+        if (!$allowDuplicateIDs) {
+            $matches = [];
+            preg_match_all('/\sid[\s]*=[\s]*(["\'])(.*?)\1/', $source, $matches);
+            if (!empty($matches[2]) && max(array_count_values($matches[2])) > 1) {
+                $elementIDs = [];
+                $walkChildren = function($element) use (&$walkChildren, &$elementIDs) {
+                    foreach ($element->childNodes as $child) {
+                        if ($child instanceof \DOMElement) {
+                            if ($child->attributes->length > 0) { // Performance optimization
+                                $id = $child->getAttribute('id');
+                                if ($id !== '') {
+                                    if (isset($elementIDs[$id])) {
+                                        throw new \Exception('A DOM node with an ID value "' . $id . '" already exists!');
+                                    } else {
+                                        $elementIDs[$id] = true;
                                     }
-                                    $walkChildren($child);
                                 }
                             }
-                        };
-                        $walkChildren($this);
-                        foreach ($elementsToRemove as $_elementsToRemove) {
-                            foreach ($_elementsToRemove as $elementToRemove) {
-                                $elementToRemove->parentNode->removeChild($elementToRemove);
-                            }
+                            $walkChildren($child);
                         }
-                        break;
                     }
-                }
-            }
-            if (isset($firstHeadElement)) {
-                $this->optimizeHeadElementsOrder($firstHeadElement);
+                };
+                $walkChildren($this);
             }
         }
 
@@ -208,10 +189,10 @@ class HTML5DOMDocument extends \DOMDocument
     }
 
     /**
-     * Load HTML from a file and adds missing doctype, html and body tags
+     * Load HTML from a file.
      *
-     * @param string $filename The path to the HTML file
-     * @param int $options Additional Libxml parameters
+     * @param string $filename The path to the HTML file.
+     * @param int $options Additional Libxml parameters.
      */
     public function loadHTMLFile($filename, $options = 0)
     {
@@ -219,9 +200,9 @@ class HTML5DOMDocument extends \DOMDocument
     }
 
     /**
-     * Adds the HTML tag to the document if missing
+     * Adds the HTML tag to the document if missing.
      *
-     * @return boolean TRUE on success, FALSE otherwise
+     * @return boolean TRUE on success, FALSE otherwise.
      */
     private function addHtmlElementIfMissing(): bool
     {
@@ -236,9 +217,9 @@ class HTML5DOMDocument extends \DOMDocument
     }
 
     /**
-     * Adds the HEAD tag to the document if missing
+     * Adds the HEAD tag to the document if missing.
      *
-     * @return boolean TRUE on success, FALSE otherwise
+     * @return boolean TRUE on success, FALSE otherwise.
      */
     private function addHeadElementIfMissing(): bool
     {
@@ -259,9 +240,9 @@ class HTML5DOMDocument extends \DOMDocument
     }
 
     /**
-     * Adds the BODY tag to the document if missing
+     * Adds the BODY tag to the document if missing.
      *
-     * @return boolean TRUE on success, FALSE otherwise
+     * @return boolean TRUE on success, FALSE otherwise.
      */
     private function addBodyElementIfMissing(): bool
     {
@@ -276,10 +257,10 @@ class HTML5DOMDocument extends \DOMDocument
     }
 
     /**
-     * Dumps the internal document into a string using HTML formatting
+     * Dumps the internal document into a string using HTML formatting.
      *
      * @param \DOMNode $node Optional parameter to output a subset of the document.
-     * @return string The document (or node) HTML code as string
+     * @return string The document (or node) HTML code as string.
      */
     public function saveHTML(\DOMNode $node = null): string
     {
@@ -301,12 +282,12 @@ class HTML5DOMDocument extends \DOMDocument
                 $tempDomDocument->loadHTML('<!DOCTYPE html>');
                 $tempDomDocument->appendChild($tempDomDocument->importNode(clone($node), true));
                 $html = $tempDomDocument->saveHTML();
-                $html = substr($html, 15); // remove the DOCTYPE
+                $html = substr($html, 16); // remove the DOCTYPE + the new line after
             } elseif ($node->nodeName === 'head' || $node->nodeName === 'body') {
-                $tempDomDocument->loadHTML('<!DOCTYPE html><html></html>');
+                $tempDomDocument->loadHTML("<!DOCTYPE html>\n<html></html>");
                 $tempDomDocument->childNodes[1]->appendChild($tempDomDocument->importNode(clone($node), true));
                 $html = $tempDomDocument->saveHTML();
-                $html = substr($html, 21, -7); // remove the DOCTYPE + html tag
+                $html = substr($html, 22, -7); // remove the DOCTYPE + the new line after + html tag
             } else {
                 $isInHead = false;
                 $parentNode = $node;
@@ -322,11 +303,12 @@ class HTML5DOMDocument extends \DOMDocument
                         break;
                     }
                 }
-                $tempDomDocument->loadHTML('<!DOCTYPE html><html>' . ($isInHead ? '<head></head>' : '<body></body>') . '</html>');
+                $tempDomDocument->loadHTML("<!DOCTYPE html>\n<html>" . ($isInHead ? '<head></head>' : '<body></body>') . '</html>');
                 $tempDomDocument->childNodes[1]->childNodes[0]->appendChild($tempDomDocument->importNode(clone($node), true));
                 $html = $tempDomDocument->saveHTML();
-                $html = substr($html, 27, -14); // remove the DOCTYPE + html + body or head tags
+                $html = substr($html, 28, -14); // remove the DOCTYPE + the new line + html + body or head tags
             }
+            $html = trim($html);
         } else {
             $removeHtmlElement = false;
             $removeHeadElement = false;
@@ -344,9 +326,13 @@ class HTML5DOMDocument extends \DOMDocument
             $meta->setAttribute('data-html5-dom-document-internal-attribute', 'charset-meta');
             $meta->setAttribute('http-equiv', 'content-type');
             $meta->setAttribute('content', 'text/html; charset=utf-8');
-            $headElement->appendChild($meta);
+            if ($headElement->firstChild !== null) {
+                $headElement->insertBefore($meta, $headElement->firstChild);
+            } else {
+                $headElement->appendChild($meta);
+            }
             $html = parent::saveHTML();
-
+            $html = rtrim($html, "\n");
 
             if ($removeHeadElement) {
                 $headElement->parentNode->removeChild($headElement);
@@ -370,19 +356,17 @@ class HTML5DOMDocument extends \DOMDocument
             if ($removeHtmlElement) {
                 $codeToRemove[] = '<html></html>';
             }
-            $html = str_replace($codeToRemove, '', $html);
 
-            // Remove the whitespace between the doctype and html tag
-            $html = trim(preg_replace('/\>\s\<html/', '><html', $html, 1));
+            $html = str_replace($codeToRemove, '', $html);
         }
-        self::$savedHTML[md5($html)] = 1;
         return $html;
     }
 
     /**
-     * Dumps the internal document into a file using HTML formatting
+     * Dumps the internal document into a file using HTML formatting.
+     * 
      * @param string $filename The path to the saved HTML document.
-     * @return int the number of bytes written or FALSE if an error occurred
+     * @return int the number of bytes written or FALSE if an error occurred.
      */
     public function saveHTMLFile($filename)
     {
@@ -399,10 +383,10 @@ class HTML5DOMDocument extends \DOMDocument
     }
 
     /**
-     * Returns the first document element matching the selector
+     * Returns the first document element matching the selector.
      *
-     * @param string $selector CSS query selector
-     * @return \DOMElement|null The result DOMElement or null if not found
+     * @param string $selector A CSS query selector. Available values: *, tagname, tagname#id, #id, tagname.classname, .classname, tagname.classname.classname2, .classname.classname2, tagname[attribute-selector], [attribute-selector], "div, p", div p, div > p, div + p and p ~ ul.
+     * @return \DOMElement|null The result DOMElement or null if not found.
      * @throws \InvalidArgumentException
      */
     public function querySelector(string $selector)
@@ -411,10 +395,10 @@ class HTML5DOMDocument extends \DOMDocument
     }
 
     /**
-     * Returns a list of document elements matching the selector
+     * Returns a list of document elements matching the selector.
      *
-     * @param string $selector CSS query selector
-     * @return \DOMNodeList Returns a list of DOMElements matching the criteria
+     * @param string $selector A CSS query selector. Available values: *, tagname, tagname#id, #id, tagname.classname, .classname, tagname.classname.classname2, .classname.classname2, tagname[attribute-selector], [attribute-selector], "div, p", div p, div > p, div + p and p ~ ul.
+     * @return \DOMNodeList Returns a list of DOMElements matching the criteria.
      * @throws \InvalidArgumentException
      */
     public function querySelectorAll(string $selector)
@@ -423,10 +407,10 @@ class HTML5DOMDocument extends \DOMDocument
     }
 
     /**
-     * Creates an element that will be replaced by the new body in insertHTML
+     * Creates an element that will be replaced by the new body in insertHTML.
      *
-     * @param string $name The name of the insert target
-     * @return \DOMElement A new DOMElement that must be set in the place where the new body will be inserted
+     * @param string $name The name of the insert target.
+     * @return \DOMElement A new DOMElement that must be set in the place where the new body will be inserted.
      */
     public function createInsertTarget(string $name)
     {
@@ -441,7 +425,7 @@ class HTML5DOMDocument extends \DOMDocument
     /**
      * Inserts a HTML document into the current document. The elements from the head and the body will be moved to their proper locations.
      *
-     * @param string $source The HTML code to be inserted
+     * @param string $source The HTML code to be inserted.
      * @param string $target Body target position. Available values: afterBodyBegin, beforeBodyEnd or insertTarget name.
      */
     public function insertHTML(string $source, string $target = 'beforeBodyEnd')
@@ -466,28 +450,6 @@ class HTML5DOMDocument extends \DOMDocument
         }
 
         $currentDomDocument = &$this;
-        $currentDomDocumentElementsIDs = null; // Here the element IDs from the current document are stored. They are used for duplicates check.
-        $buildCurrentDomDocumentElementsIDs = function() use (&$currentDomDocument, &$currentDomDocumentElementsIDs) {
-            if ($currentDomDocumentElementsIDs === null) {
-                $currentDomDocumentElementsIDs = [];
-            } else {
-                return;
-            }
-            $walkChildren = function($element) use (&$walkChildren, &$currentDomDocumentElementsIDs) {
-                foreach ($element->childNodes as $child) {
-                    if ($child instanceof \DOMElement) {
-                        if ($child->attributes->length > 0) { // Performance optimization
-                            $id = $child->getAttribute('id');
-                            if ($id !== '') {
-                                $currentDomDocumentElementsIDs[] = $id;
-                            }
-                        }
-                        $walkChildren($child);
-                    }
-                }
-            };
-            $walkChildren($currentDomDocument);
-        };
 
         $copyAttributes = function($sourceNode, $targetNode) {
             foreach ($sourceNode->attributes as $attributeName => $attribute) {
@@ -499,9 +461,6 @@ class HTML5DOMDocument extends \DOMDocument
         $currentDomHeadElement = null;
         $currentDomBodyElement = null;
 
-        $headTitlesElementsChanged = false;
-        $headMetaElementsChanged = false;
-
         foreach ($sources as $sourceData) {
             if (!isset($sourceData['source'])) {
                 throw new \Exception('Missing source key');
@@ -510,58 +469,7 @@ class HTML5DOMDocument extends \DOMDocument
             $target = isset($sourceData['target']) ? $sourceData['target'] : 'beforeBodyEnd';
 
             $domDocument = clone(self::$newObjectsCache['html5domdocument']);
-            $domDocument->internalDisableDuplicatesRemoval = true;
-            $domDocument->loadHTML($source);
-            unset($domDocument->internalDisableDuplicatesRemoval);
-
-            $potentialNewElementsIDs = $this->getPotentialElementsIDs($source);
-            $hasPotentialNewElementsIDs = !empty($potentialNewElementsIDs);
-            $getNewChild = function($child) use ($currentDomDocument, $hasPotentialNewElementsIDs, &$buildCurrentDomDocumentElementsIDs, &$currentDomDocumentElementsIDs) {
-                if ($hasPotentialNewElementsIDs) {
-                    if ($child instanceof \DOMElement) { // If the current element has an ID that exists in the current document, null is returned
-                        if ($child->attributes->length > 0) { // Performance optimization
-                            $id = $child->getAttribute('id');
-                            if ($id !== '') {
-                                if ($currentDomDocumentElementsIDs === null) {
-                                    $buildCurrentDomDocumentElementsIDs();
-                                }
-                                if (array_search($id, $currentDomDocumentElementsIDs) !== false) {
-                                    return null;
-                                }
-                                $currentDomDocumentElementsIDs[] = $id;
-                            }
-                        }
-                    }
-                    if ($child->firstChild !== null) { // Remove current element's children with IDs that exists in the current document
-                        $elementsToRemove = []; // Elements to remove because they exist in the current document
-                        $walkChildren = function($element) use (&$walkChildren, &$elementsToRemove, &$buildCurrentDomDocumentElementsIDs, &$currentDomDocumentElementsIDs) {
-                            foreach ($element->childNodes as $_child) {
-                                if ($_child instanceof \DOMElement) {
-                                    if ($_child->attributes->length > 0) { // Performance optimization
-                                        $id = $_child->getAttribute('id');
-                                        if ($id !== '') {
-                                            if ($currentDomDocumentElementsIDs === null) {
-                                                $buildCurrentDomDocumentElementsIDs();
-                                            }
-                                            if (array_search($id, $currentDomDocumentElementsIDs) !== false) {
-                                                $elementsToRemove[] = $_child;
-                                                continue; // Don't check the children because they will be removed anyway
-                                            }
-                                            $currentDomDocumentElementsIDs[] = $id;
-                                        }
-                                    }
-                                    $walkChildren($_child);
-                                }
-                            }
-                        };
-                        $walkChildren($child);
-                        foreach ($elementsToRemove as $elementToRemove) {
-                            $elementToRemove->parentNode->removeChild($elementToRemove);
-                        }
-                    }
-                }
-                return $currentDomDocument->importNode($child, true);
-            };
+            $domDocument->loadHTML($source, self::ALLOW_DUPLICATE_IDS);
 
             $htmlElement = $domDocument->getElementsByTagName('html')->item(0);
             if ($htmlElement !== null) {
@@ -588,16 +496,9 @@ class HTML5DOMDocument extends \DOMDocument
                     }
                 }
                 foreach ($headElement->childNodes as $headElementChild) {
-                    $newNode = $getNewChild($headElementChild);
+                    $newNode = $currentDomDocument->importNode($headElementChild, true);
                     if ($newNode !== null) {
                         $currentDomHeadElement->appendChild($newNode);
-                        $nodeName = $newNode->nodeName;
-                        if (!$headTitlesElementsChanged && $nodeName === 'title') {
-                            $headTitlesElementsChanged = true;
-                        }
-                        if (!$headMetaElementsChanged && $nodeName === 'meta') {
-                            $headMetaElementsChanged = true;
-                        }
                     }
                 }
                 if ($headElement->attributes->length > 0) {
@@ -619,7 +520,7 @@ class HTML5DOMDocument extends \DOMDocument
                 if ($target === 'afterBodyBegin') {
                     $bodyElementChildrenCount = $bodyElementChildren->length;
                     for ($i = $bodyElementChildrenCount - 1; $i >= 0; $i--) {
-                        $newNode = $getNewChild($bodyElementChildren->item($i));
+                        $newNode = $currentDomDocument->importNode($bodyElementChildren->item($i), true);
                         if ($newNode !== null) {
                             if ($currentDomBodyElement->firstChild === null) {
                                 $currentDomBodyElement->appendChild($newNode);
@@ -630,7 +531,7 @@ class HTML5DOMDocument extends \DOMDocument
                     }
                 } else if ($target === 'beforeBodyEnd') {
                     foreach ($bodyElementChildren as $bodyElementChild) {
-                        $newNode = $getNewChild($bodyElementChild);
+                        $newNode = $currentDomDocument->importNode($bodyElementChild, true);
                         if ($newNode !== null) {
                             $currentDomBodyElement->appendChild($newNode);
                         }
@@ -640,7 +541,7 @@ class HTML5DOMDocument extends \DOMDocument
                     foreach ($targetElements as $targetElement) {
                         if ($targetElement->getAttribute('name') === $target) {
                             foreach ($bodyElementChildren as $bodyElementChild) {
-                                $newNode = $getNewChild($bodyElementChild);
+                                $newNode = $currentDomDocument->importNode($bodyElementChild, true);
                                 if ($newNode !== null) {
                                     $targetElement->parentNode->insertBefore($newNode, $targetElement);
                                 }
@@ -663,126 +564,145 @@ class HTML5DOMDocument extends \DOMDocument
                 }
             }
         }
-
-        if ($headTitlesElementsChanged) {
-            $this->removeDuplicateTitleTags();
-        }
-        if ($headMetaElementsChanged) {
-            $this->removeDuplicateMetatags();
-            $this->optimizeHeadElementsOrder($currentDomHeadElement); // $currentDomHeadElement is set only in this case
-        }
     }
 
     /**
-     * The last title element will remain if multiple.
+     * Applies the modifications specified to the DOM document.
+     * 
+     * @param int $modifications The modifications to apply. Available values:
+     *  - HTML5DOMDocument::FIX_MULTIPLE_TITLES - removes all but the last title elements.
+     *  - HTML5DOMDocument::FIX_DUPLICATE_METATAGS - removes all but the last metatags with matching name or property attributes.
+     *  - HTML5DOMDocument::FIX_MULTIPLE_HEADS - merges multiple head elements.
+     *  - HTML5DOMDocument::FIX_MULTIPLE_BODIES - merges multiple body elements.
+     *  - HTML5DOMDocument::OPTIMIZE_HEAD - moves charset metatag and title elements first.
      */
-    private function removeDuplicateTitleTags()
+    public function modify($modifications = 0)
     {
-        $headElement = $this->getElementsByTagName('head')->item(0);
-        if ($headElement !== null) {
-            $titleTags = $headElement->getElementsByTagName('title');
-            $titleTagsCount = $titleTags->length;
-            for ($i = 0; $i < $titleTagsCount - 1; $i++) {
-                $node = $titleTags->item($i);
-                $node->parentNode->removeChild($node);
+
+        $fixMultipleTitles = ($modifications & self::FIX_MULTIPLE_TITLES) !== 0;
+        $fixDuplicateMetatags = ($modifications & self::FIX_DUPLICATE_METATAGS) !== 0;
+        $fixMultipleHeads = ($modifications & self::FIX_MULTIPLE_HEADS) !== 0;
+        $fixMultipleBodies = ($modifications & self::FIX_MULTIPLE_BODIES) !== 0;
+        $optimizeHead = ($modifications & self::OPTIMIZE_HEAD) !== 0;
+
+        $headElements = $this->getElementsByTagName('head');
+
+        if ($fixMultipleHeads) { // Merges multiple head elements.
+            if ($headElements->length > 1) {
+                $firstHeadElement = $headElements->item(0);
+                while ($headElements->length > 1) {
+                    $nextHeadElement = $headElements->item(1);
+                    $nextHeadElementChildren = $nextHeadElement->childNodes;
+                    $nextHeadElementChildrenCount = $nextHeadElementChildren->length;
+                    for ($i = 0; $i < $nextHeadElementChildrenCount; $i++) {
+                        $firstHeadElement->appendChild($nextHeadElementChildren->item(0));
+                    }
+                    $nextHeadElement->parentNode->removeChild($nextHeadElement);
+                }
+                $headElements = [$firstHeadElement];
             }
         }
-    }
 
-    /**
-     * Removes duplicate meta tags. Meta tags checked by name or property attributes.
-     */
-    private function removeDuplicateMetatags()
-    {
-        $headElement = $this->getElementsByTagName('head')->item(0);
-        if ($headElement !== null) {
-            $metaTags = $headElement->getElementsByTagName('meta');
-            if ($metaTags->length > 0) {
-                $list = [];
-                $idsList = [];
-                foreach ($metaTags as $metaTag) {
-                    $id = $metaTag->getAttribute('name');
-                    if ($id !== '') {
-                        $id = 'name:' . $id;
-                    } else {
-                        $id = $metaTag->getAttribute('property');
+        foreach ($headElements as $headElement) {
+
+            if ($fixMultipleTitles) { // Remove all title elements except the last one.
+                $titleTags = $headElement->getElementsByTagName('title');
+                $titleTagsCount = $titleTags->length;
+                for ($i = 0; $i < $titleTagsCount - 1; $i++) {
+                    $node = $titleTags->item($i);
+                    $node->parentNode->removeChild($node);
+                }
+            }
+
+            if ($fixDuplicateMetatags) { // Remove all meta tags that has matching name or property attributes.
+                $metaTags = $headElement->getElementsByTagName('meta');
+                if ($metaTags->length > 0) {
+                    $list = [];
+                    $idsList = [];
+                    foreach ($metaTags as $metaTag) {
+                        $id = $metaTag->getAttribute('name');
                         if ($id !== '') {
-                            $id = 'property:' . $id;
+                            $id = 'name:' . $id;
                         } else {
-                            $id = $metaTag->getAttribute('charset');
+                            $id = $metaTag->getAttribute('property');
                             if ($id !== '') {
-                                $id = 'charset';
+                                $id = 'property:' . $id;
+                            } else {
+                                $id = $metaTag->getAttribute('charset');
+                                if ($id !== '') {
+                                    $id = 'charset';
+                                }
+                            }
+                        }
+                        if (!isset($idsList[$id])) {
+                            $idsList[$id] = 0;
+                        }
+                        $idsList[$id] ++;
+                        $list[] = [$metaTag, $id];
+                    }
+                    foreach ($idsList as $id => $count) {
+                        if ($count > 1 && $id !== '') {
+                            foreach ($list as $i => $item) {
+                                if ($item[1] === $id) {
+                                    $node = $item[0];
+                                    $node->parentNode->removeChild($node);
+                                    unset($list[$i]);
+                                    $count--;
+                                }
+                                if ($count === 1) {
+                                    break;
+                                }
                             }
                         }
                     }
-                    if (!isset($idsList[$id])) {
-                        $idsList[$id] = 0;
-                    }
-                    $idsList[$id] ++;
-                    $list[] = [$metaTag, $id];
                 }
-                foreach ($idsList as $id => $count) {
-                    if ($count > 1 && $id !== '') {
-                        foreach ($list as $i => $item) {
-                            if ($item[1] === $id) {
-                                $node = $item[0];
-                                $node->parentNode->removeChild($node);
-                                unset($list[$i]);
-                                $count--;
-                            }
-                            if ($count === 1) {
-                                break;
-                            }
+            }
+
+            if ($optimizeHead) { // Moves charset metatag and title elements first.
+                $titleElement = $headElement->getElementsByTagName('title')->item(0);
+                $hasTitleElement = false;
+                if ($titleElement !== null && $titleElement->previousSibling !== null) {
+                    $headElement->insertBefore($titleElement, $headElement->firstChild);
+                    $hasTitleElement = true;
+                }
+                $metaTags = $headElement->getElementsByTagName('meta');
+                $metaTagsLength = $metaTags->length;
+                if ($metaTagsLength > 0) {
+                    $charsetMetaTag = null;
+                    $nodesToMove = [];
+                    for ($i = $metaTagsLength - 1; $i >= 0; $i--) {
+                        $nodesToMove[$i] = $metaTags->item($i);
+                    }
+                    for ($i = $metaTagsLength - 1; $i >= 0; $i--) {
+                        $nodeToMove = $nodesToMove[$i];
+                        if ($charsetMetaTag === null && $nodeToMove->getAttribute('charset') !== '') {
+                            $charsetMetaTag = $nodeToMove;
                         }
+                        $referenceNode = $headElement->childNodes->item($hasTitleElement ? 1 : 0);
+                        if ($nodeToMove !== $referenceNode) {
+                            $headElement->insertBefore($nodeToMove, $referenceNode);
+                        }
+                    }
+                    if ($charsetMetaTag !== null && $charsetMetaTag->previousSibling !== null) {
+                        $headElement->insertBefore($charsetMetaTag, $headElement->firstChild);
                     }
                 }
             }
         }
-    }
 
-    /**
-     * Returns and associative array containing the id of an element and potential occurrences.
-     * @param string $html
-     */
-    private function getPotentialElementsIDs($html)
-    {
-        $matches = [];
-        preg_match_all('/\sid[\s]*=[\s]*(["\'])(.*?)\1/', $html, $matches);
-        return array_count_values($matches[2]);
-    }
-
-    /**
-     * Moves the title element and the metatags first
-     * @param \DOMElement $headElement
-     */
-    private function optimizeHeadElementsOrder(&$headElement)
-    {
-        $titleElement = $headElement->getElementsByTagName('title')->item(0);
-        $hasTitleElement = false;
-        if ($titleElement !== null && $titleElement->previousSibling !== null) {
-            $headElement->insertBefore($titleElement, $headElement->firstChild);
-            $hasTitleElement = true;
-        }
-        $metaTags = $headElement->getElementsByTagName('meta');
-        $metaTagsLength = $metaTags->length;
-        if ($metaTagsLength > 0) {
-            $charsetMetaTag = null;
-            $nodesToMove = [];
-            for ($i = $metaTagsLength - 1; $i >= 0; $i--) {
-                $nodesToMove[$i] = $metaTags->item($i);
-            }
-            for ($i = $metaTagsLength - 1; $i >= 0; $i--) {
-                $nodeToMove = $nodesToMove[$i];
-                if ($charsetMetaTag === null && $nodeToMove->getAttribute('charset') !== '') {
-                    $charsetMetaTag = $nodeToMove;
+        if ($fixMultipleBodies) { // Merges multiple body elements.
+            $bodyElements = $this->getElementsByTagName('body');
+            if ($bodyElements->length > 1) {
+                $firstBodyElement = $bodyElements->item(0);
+                while ($bodyElements->length > 1) {
+                    $nextBodyElement = $bodyElements->item(1);
+                    $nextBodyElementChildren = $nextBodyElement->childNodes;
+                    $nextBodyElementChildrenCount = $nextBodyElementChildren->length;
+                    for ($i = 0; $i < $nextBodyElementChildrenCount; $i++) {
+                        $firstBodyElement->appendChild($nextBodyElementChildren->item(0));
+                    }
+                    $nextBodyElement->parentNode->removeChild($nextBodyElement);
                 }
-                $referenceNode = $headElement->childNodes->item($hasTitleElement ? 1 : 0);
-                if ($nodeToMove !== $referenceNode) {
-                    $headElement->insertBefore($nodeToMove, $referenceNode);
-                }
-            }
-            if ($charsetMetaTag !== null && $charsetMetaTag->previousSibling !== null) {
-                $headElement->insertBefore($charsetMetaTag, $headElement->firstChild);
             }
         }
     }

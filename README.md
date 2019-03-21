@@ -8,23 +8,29 @@ HTML5DOMDocument extends the native [DOMDocument](http://php.net/manual/en/class
 [![License](https://poser.pugx.org/ivopetkov/html5-dom-document-php/license)](https://packagist.org/packages/ivopetkov/html5-dom-document-php)
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/dafa5722288b409a9d447fa6aabd572b)](https://www.codacy.com/app/ivo_2/html5-dom-document-php)
 
+## Why use?
+
+- Preserves html entities (DOMDocument does not)
+- Preserves void tags (DOMDocument does not)
+- Allows **inserting HTML code** that moves the correct parts to their proper places (head elements are inserted in the head, body elements in the body)
+- Allows **querying the DOM with CSS selectors** (currently available: *, tagname, tagname#id, #id, tagname.classname, .classname, tagname.classname.classname2, .classname.classname2, tagname[attribute-selector], [attribute-selector], "div, p", div p, div > p, div + p and p ~ ul.)
+- Adds support for element->classList.
+- Adds support for element->innerHTML.
+- Adds support for element->outerHTML.
+
 ## Install via Composer
 
 ```shell
-composer require ivopetkov/html5-dom-document-php
+composer require ivopetkov/html5-dom-document-php:2.*
 ```
 
-## Differences to the native DOMDocument library
+## Documentation
 
-- Preserves white spaces
-- Preserves html entities
-- Preserves void tags
-- Allows **inserting HTML code** that moves the correct parts to their proper places (head elements are inserted in the head, body elements in the body)
-- Allows **querying the DOM with CSS selectors** (currently avaiable: *, tagname, tagname#id, tagname.classname, #id, .classname)
+Full [documentation](https://github.com/ivopetkov/html5-dom-document-php/blob/master/docs/markdown/index.md) is available as part of this repository.
 
-## Usage
+## Examples
 
-HTML5DOMDocument is really easy to use - just like you should use DOMDocument.
+Use just like you should use DOMDocument:
 ```php
 <?php
 require 'vendor/autoload.php';
@@ -34,151 +40,7 @@ $dom->loadHTML('<!DOCTYPE html><html><body>Hello</body></html>');
 echo $dom->saveHTML();
 ```
 
-## Documentation
-
-### Classes
-
-This is a list of all the new methods and properties that the library has added to the [DOMDocument](http://php.net/manual/en/class.domdocument.php) and the [DOMElement](http://php.net/manual/en/class.domelement.php) classes.
-
-#### IvoPetkov\HTML5DOMDocument
-##### Methods
-
-```php
-public \DOMElement|null querySelector ( string $selector )
-```
-
-Returns the first document element matching the selector
-
-_Parameters_
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;`$selector`
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CSS query selector
-
-_Returns_
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The result DOMElement or null if not found
-
-```php
-public DOMNodeList querySelectorAll ( string $selector )
-```
-
-Returns a list of document elements matching the selector
-
-_Parameters_
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;`$selector`
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CSS query selector
-
-_Returns_
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Returns a list of DOMElements matching the criteria
-
-```php
-public \DOMElement createInsertTarget ( string $name )
-```
-
-Creates an element that will be replaced by the new body in insertHTML
-
-_Parameters_
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;`$name`
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The name of the insert target
-
-_Returns_
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;A new DOMElement that must be set in the place where the new body will be inserted
-
-```php
-public void insertHTML ( string $source [, string $target = 'beforeBodyEnd' ] )
-```
-
-Inserts a HTML document into the current document. The elements from the head and the body will be moved to their proper locations.
-
-_Parameters_
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;`$source`
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The HTML code to be inserted
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;`$target`
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Body target position. Available values: afterBodyBegin, beforeBodyEnd or insertTarget name.
-
-_Returns_
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;No value is returned.
-
-#### IvoPetkov\HTML5DOMElement
-##### Properties
-
-`public string $innerHTML`
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The HTML code inside the element
-
-`public string $outerHTML`
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The HTML code for the element including the code inside
-
-##### Methods
-
-```php
-public array getAttributes ( void )
-```
-
-Returns an array containing all attributes
-
-_Returns_
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;An associative array containing all attributes
-
-```php
-public string __toString ( void )
-```
-
-Returns the element outerHTML
-
-_Returns_
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The element outerHTML
-
-```php
-public \DOMElement|null querySelector ( string $selector )
-```
-
-Returns the first child element matching the selector
-
-_Parameters_
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;`$selector`
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CSS query selector
-
-_Returns_
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;The result DOMElement or null if not found
-
-```php
-public DOMNodeList querySelectorAll ( string $selector )
-```
-
-Returns a list of children elements matching the selector
-
-_Parameters_
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;`$selector`
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;CSS query selector
-
-_Returns_
-
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Returns a list of DOMElements matching the criteria
-
-## Examples
-
-Querying the document with CSS selectors and getting the innerHTML and the outerHTML of the elements.
+Query the document with CSS selectors and get the innerHTML and the outerHTML of the elements:
 
 ```php
 $dom = new IvoPetkov\HTML5DOMDocument();
@@ -188,10 +50,10 @@ echo $dom->querySelector('h1')->innerHTML;
 // Hello
 
 echo $dom->querySelector('.content')->outerHTML;
-// <div class="content">This is some text</div><
+// <div class="content">This is some text</div>
 ```
 
-Inserting HTML code into other HTML code.
+Insert HTML code into a HTML document (other HTML code):
 
 ```php
 $dom = new IvoPetkov\HTML5DOMDocument();
@@ -232,8 +94,20 @@ echo $dom->saveHTML();
 //     </html>
 ```
 
-## License
-HTML5DOMDocument is open-sourced software. It's free to use under the MIT license. See the [license file](https://github.com/ivopetkov/html5-dom-document-php/blob/master/LICENSE) for more information.
+Manipulate the values of the class attribute of an element:
 
-## Author
-This library is created by Ivo Petkov. Feel free to contact me at [@IvoPetkovCom](https://twitter.com/IvoPetkovCom) or [ivopetkov.com](https://ivopetkov.com).
+```php
+$dom = new IvoPetkov\HTML5DOMDocument();
+$dom->loadHTML('<div class="class1"></div>');
+
+echo $dom->querySelector('div')->classList->add('class2');
+```
+
+## License
+This project is licensed under the MIT License. See the [license file](https://github.com/ivopetkov/html5-dom-document-php/blob/master/LICENSE) for more information.
+
+## Contributing
+Feel free to open new issues and contribute to the project. Let's make it awesome and let's do in a positive way.
+
+## Authors
+This library is created and maintained by [Ivo Petkov](https://github.com/ivopetkov/) ([ivopetkov.com](https://ivopetkov.com)) and some [awesome folks](https://github.com/ivopetkov/html5-dom-document-php/graphs/contributors).
